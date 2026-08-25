@@ -1,13 +1,17 @@
-
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "./lib/supabase";
 
 type Profile = { id: string; username: string };
 type ChatSummary = { chatId: string; otherUser: Profile; lastMessage: string; lastTime: string; unreadCount: number };
 type Message = { id: string; sender_id: string; content: string; created_at: string; read?: boolean };
+type CallState = "idle" | "calling" | "ringing" | "connected";
+
+const RTC_CONFIG = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+};
 
 export default function Home() {
   const router = useRouter();
@@ -20,6 +24,15 @@ export default function Home() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
 
+  // Calling state
+  const [callState, setCallState] = useState<CallState>("idle");
+  const [incomingCall, setIncomingCall] = useState<{ chatId: string; otherUser: Profile } | null>(null);
+  const [muted, setMuted] = useState(false);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const signalChannelRef = useRef<any>(null);
+
   useEffect(() => {
     async function init() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -30,6 +43,7 @@ export default function Home() {
       setUserId(user.id);
       await loadChats(user.id);
       setLoading(false);
+      listenForIncomingCalls(user.id);
     }
     init();
   }, []);
@@ -147,7 +161,6 @@ export default function Home() {
       .order("created_at", { ascending: true });
     setMessages(data ?? []);
 
-    // Mark incoming messages as read
     if (userId) {
       await supabase
         .from("messages")
@@ -156,8 +169,6 @@ export default function Home() {
         .neq("sender_id", userId)
         .eq("read", false);
     }
-
-    supabase.getChannels().forEach((ch) => supabase.removeChannel(ch));
 
     supabase
       .channel(`messages:${chatId}`)
@@ -169,7 +180,6 @@ export default function Home() {
             if (prev.some((m) => m.id === payload.new.id)) return prev;
             return [...prev, payload.new as Message];
           });
-          // Mark it read immediately since the chat is open
           if (userId && payload.new.sender_id !== userId) {
             supabase.from("messages").update({ read: true }).eq("id", payload.new.id).then();
           }
@@ -203,8 +213,250 @@ export default function Home() {
     if (userId) loadChats(userId);
   }
 
+  // ---------- CALLING LOGIC ----------
+
+  function listenForIncomingCalls(uid: string) {
+    const existing = supabase.getChannels().find((ch) => ch.topic === "realtime:incoming-calls");
+    if (existing) return;
+
+    supabase
+      .channel("incoming-calls")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "call_signals" },
+        async (payload) => {
+          const signal = payload.new as any;
+          if (signal.sender_id === uid) return;
+          if (signal.type !== "offer") return;
+
+          const { data: participants } = await supabase
+            .from("chat_participants")
+            .select("user_id")
+            .eq("chat_id", signal.chat_id);
+
+          const isParticipant = participants?.some((p) => p.user_id === uid);
+          if (!isParticipant) return;
+
+          const { data: senderProfile } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .eq("id", signal.sender_id)
+            .single();
+
+          if (senderProfile) {
+            setIncomingCall({ chatId: signal.chat_id, otherUser: senderProfile });
+            setCallState("ringing");
+            (window as any).__pendingOffer = signal.payload;
+          }
+        }
+      )
+      .subscribe();
+  }
+
+  async function startCall() {
+    if (!activeChat || !userId) return;
+    setCallState("calling");
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    localStreamRef.current = stream;
+
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    pcRef.current = pc;
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+    pc.ontrack = (event) => {
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = event.streams[0];
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        supabase.from("call_signals").insert({
+          chat_id: activeChat.chatId,
+          sender_id: userId,
+          type: "ice-candidate",
+          payload: event.candidate.toJSON(),
+        });
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    await supabase.from("call_signals").insert({
+      chat_id: activeChat.chatId,
+      sender_id: userId,
+      type: "offer",
+      payload: offer,
+    });
+
+    listenForAnswer(activeChat.chatId);
+  }
+
+  function listenForAnswer(chatId: string) {
+    const channel = supabase
+      .channel(`call-answer:${chatId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "call_signals", filter: `chat_id=eq.${chatId}` },
+        async (payload) => {
+          const signal = payload.new as any;
+          if (signal.sender_id === userId) return;
+
+          if (signal.type === "answer" && pcRef.current) {
+            await pcRef.current.setRemoteDescription(new RTCSessionDescription(signal.payload));
+            setCallState("connected");
+          }
+          if (signal.type === "ice-candidate" && pcRef.current) {
+            try {
+              await pcRef.current.addIceCandidate(new RTCIceCandidate(signal.payload));
+            } catch (e) {}
+          }
+          if (signal.type === "hangup") {
+            endCall();
+          }
+        }
+      )
+      .subscribe();
+    signalChannelRef.current = channel;
+  }
+
+  async function acceptCall() {
+    if (!incomingCall || !userId) return;
+    const { chatId, otherUser } = incomingCall;
+    setActiveChat({ chatId, otherUser });
+    setIncomingCall(null);
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    localStreamRef.current = stream;
+
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    pcRef.current = pc;
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+    pc.ontrack = (event) => {
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = event.streams[0];
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        supabase.from("call_signals").insert({
+          chat_id: chatId,
+          sender_id: userId,
+          type: "ice-candidate",
+          payload: event.candidate.toJSON(),
+        });
+      }
+    };
+
+    const offer = (window as any).__pendingOffer;
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    await supabase.from("call_signals").insert({
+      chat_id: chatId,
+      sender_id: userId,
+      type: "answer",
+      payload: answer,
+    });
+
+    setCallState("connected");
+    listenForAnswer(chatId);
+  }
+
+  function declineCall() {
+    setIncomingCall(null);
+    setCallState("idle");
+  }
+
+  function toggleMute() {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      audioTrack.enabled = !audioTrack.enabled;
+      setMuted(!audioTrack.enabled);
+    }
+  }
+
+  async function endCall() {
+    if (activeChat && userId) {
+      await supabase.from("call_signals").insert({
+        chat_id: activeChat.chatId,
+        sender_id: userId,
+        type: "hangup",
+        payload: {},
+      });
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    if (signalChannelRef.current) {
+      supabase.removeChannel(signalChannelRef.current);
+      signalChannelRef.current = null;
+    }
+    setCallState("idle");
+    setMuted(false);
+  }
+
+  // ---------- RENDER ----------
+
   if (loading) {
     return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">Loading...</div>;
+  }
+
+  // Incoming call popup (shows over everything)
+  if (incomingCall && callState === "ringing") {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center gap-6">
+        <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-3xl font-bold">
+          {incomingCall.otherUser.username.charAt(0).toUpperCase()}
+        </div>
+        <p className="text-xl font-semibold">{incomingCall.otherUser.username}</p>
+        <p className="text-gray-400">Incoming call...</p>
+        <div className="flex gap-6 mt-4">
+          <button onClick={declineCall} className="bg-red-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
+            ✕
+          </button>
+          <button onClick={acceptCall} className="bg-green-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
+            ✓
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Active/outgoing call screen
+  if (callState === "calling" || callState === "connected") {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center gap-6">
+        <audio ref={remoteAudioRef} autoPlay />
+        <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-3xl font-bold">
+          {activeChat?.otherUser.username.charAt(0).toUpperCase()}
+        </div>
+        <p className="text-xl font-semibold">{activeChat?.otherUser.username}</p>
+        <p className="text-gray-400">{callState === "calling" ? "Calling..." : "Connected"}</p>
+        <div className="flex gap-6 mt-4">
+          <button
+            onClick={toggleMute}
+            className={`rounded-full w-16 h-16 flex items-center justify-center text-xl ${muted ? "bg-gray-600" : "bg-gray-700"}`}
+          >
+            {muted ? "🔇" : "🎙️"}
+          </button>
+          <button onClick={endCall} className="bg-red-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
+            ✕
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (activeChat) {
@@ -212,7 +464,10 @@ export default function Home() {
       <div className="min-h-screen bg-gray-900 text-white flex flex-col">
         <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800">
           <button onClick={goBackToList} className="text-blue-400">← Back</button>
-          <span className="font-semibold">{activeChat.otherUser.username}</span>
+          <span className="font-semibold flex-1">{activeChat.otherUser.username}</span>
+          <button onClick={startCall} className="bg-green-600 rounded-full w-9 h-9 flex items-center justify-center">
+            📞
+          </button>
         </header>
 
         <div className="flex-1 p-4 space-y-3 overflow-y-auto">
