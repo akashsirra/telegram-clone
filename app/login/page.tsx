@@ -1,96 +1,98 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "../lib/supabase";
 
 export default function LoginPage() {
-  const router = useRouter();
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignup, setIsSignup] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [username, setUsername] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit() {
-    setError("");
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
 
-    if (isSignUp) {
-      const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-      if (data.user) {
-        await supabase.from("profiles").insert({
-          id: data.user.id,
-          username: username || email.split("@")[0],
-        });
-      }
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-    }
+    // Add your Supabase / Firebase / Auth logic here
+    console.log("Submitting:", { email, password, rememberMe, isSignup });
 
-    setLoading(false);
-    router.push("/");
-  }
+    // Simulating API request delay
+    setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+  };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center px-4">
-      <div className="w-full max-w-sm space-y-4">
-        <h1 className="text-2xl font-bold text-center">
-          {isSignUp ? "Create account" : "Welcome back"}
-        </h1>
+    <div className="flex min-h-screen items-center justify-center bg-gray-900 text-white p-4">
+      <div className="w-full max-w-md p-8 space-y-6 bg-gray-800 rounded-xl shadow-lg border border-gray-700">
+        <h2 className="text-2xl font-bold text-center">
+          {isSignup ? "Create an Account" : "Welcome Back"}
+        </h2>
 
-        {isSignUp && (
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Username"
-            className="w-full bg-gray-800 rounded-lg px-4 py-3 text-sm outline-none"
-          />
-        )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Email</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="you@example.com"
+            />
+          </div>
 
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="Email"
-          type="email"
-          className="w-full bg-gray-800 rounded-lg px-4 py-3 text-sm outline-none"
-        />
+          <div>
+            <label className="block text-sm font-medium mb-1">Password</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="••••••••"
+            />
+          </div>
 
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
-          type="password"
-          className="w-full bg-gray-800 rounded-lg px-4 py-3 text-sm outline-none"
-        />
+          {/* Remember Me option — visible only on Login */}
+          {!isSignup && (
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                Remember me
+              </label>
+            </div>
+          )}
 
-        {error && <p className="text-red-400 text-sm">{error}</p>}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 font-semibold rounded-lg transition duration-200 disabled:opacity-50"
+          >
+            {loading
+              ? "Please wait..."
+              : isSignup
+              ? "Sign Up"
+              : "Log In"}
+          </button>
+        </form>
 
-        <button
-          onClick={handleSubmit}
-          disabled={loading}
-          className="w-full bg-blue-600 rounded-lg py-3 text-sm font-semibold"
-        >
-          {loading ? "Please wait..." : isSignUp ? "Sign Up" : "Log In"}
-        </button>
-
-        <button
-          onClick={() => setIsSignUp(!isSignUp)}
-          className="w-full text-center text-blue-400 text-sm"
-        >
-          {isSignUp ? "Already have an account? Log in" : "New here? Create an account"}
-        </button>
+        <div className="text-center pt-2">
+          <button
+            type="button"
+            onClick={() => setIsSignup(!isSignup)}
+            className="w-full text-center text-blue-400 text-sm hover:underline"
+          >
+            {isSignup
+              ? "Already have an account? Log in"
+              : "New here? Sign up"}
+          </button>
+        </div>
       </div>
     </div>
   );

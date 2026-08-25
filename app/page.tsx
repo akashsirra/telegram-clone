@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -5,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "./lib/supabase";
 
 type Profile = { id: string; username: string };
-type ChatSummary = { chatId: string; otherUser: Profile; lastMessage: string; lastTime: string };
-type Message = { id: string; sender_id: string; content: string; created_at: string };
+type ChatSummary = { chatId: string; otherUser: Profile; lastMessage: string; lastTime: string; unreadCount: number };
+type Message = { id: string; sender_id: string; content: string; created_at: string; read?: boolean };
 
 export default function Home() {
   const router = useRouter();
@@ -65,6 +66,13 @@ export default function Home() {
         .limit(1)
         .maybeSingle();
 
+      const { count: unreadCount } = await supabase
+        .from("messages")
+        .select("*", { count: "exact", head: true })
+        .eq("chat_id", chatId)
+        .eq("read", false)
+        .neq("sender_id", uid);
+
       results.push({
         chatId,
         otherUser: otherProfile,
@@ -72,6 +80,7 @@ export default function Home() {
         lastTime: lastMsg?.created_at
           ? new Date(lastMsg.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
           : "",
+        unreadCount: unreadCount ?? 0,
       });
     }
 
@@ -87,7 +96,6 @@ export default function Home() {
   async function startChatWith(otherUser: Profile) {
     if (!userId) return;
 
-    // Check if a chat already exists between these two users
     const { data: myChats } = await supabase
       .from("chat_participants")
       .select("chat_id")
@@ -109,7 +117,6 @@ export default function Home() {
       }
     }
 
-    // No existing chat, create a new one
     const { data: newChat, error } = await supabase
       .from("chats")
       .insert({})
@@ -135,10 +142,20 @@ export default function Home() {
     setActiveChat({ chatId, otherUser });
     const { data } = await supabase
       .from("messages")
-      .select("id, sender_id, content, created_at")
+      .select("id, sender_id, content, created_at, read")
       .eq("chat_id", chatId)
       .order("created_at", { ascending: true });
     setMessages(data ?? []);
+
+    // Mark incoming messages as read
+    if (userId) {
+      await supabase
+        .from("messages")
+        .update({ read: true })
+        .eq("chat_id", chatId)
+        .neq("sender_id", userId)
+        .eq("read", false);
+    }
 
     supabase.getChannels().forEach((ch) => supabase.removeChannel(ch));
 
@@ -152,6 +169,10 @@ export default function Home() {
             if (prev.some((m) => m.id === payload.new.id)) return prev;
             return [...prev, payload.new as Message];
           });
+          // Mark it read immediately since the chat is open
+          if (userId && payload.new.sender_id !== userId) {
+            supabase.from("messages").update({ read: true }).eq("id", payload.new.id).then();
+          }
         }
       )
       .subscribe();
@@ -164,6 +185,7 @@ export default function Home() {
       chat_id: activeChat.chatId,
       sender_id: userId,
       content: draft.trim(),
+      read: false,
     });
 
     if (!error) {
@@ -176,6 +198,11 @@ export default function Home() {
     router.push("/login");
   }
 
+  function goBackToList() {
+    setActiveChat(null);
+    if (userId) loadChats(userId);
+  }
+
   if (loading) {
     return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">Loading...</div>;
   }
@@ -184,7 +211,7 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex flex-col">
         <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800">
-          <button onClick={() => setActiveChat(null)} className="text-blue-400">← Back</button>
+          <button onClick={goBackToList} className="text-blue-400">← Back</button>
           <span className="font-semibold">{activeChat.otherUser.username}</span>
         </header>
 
@@ -279,6 +306,11 @@ export default function Home() {
               </div>
               <p className="text-sm text-gray-400 truncate">{chat.lastMessage}</p>
             </div>
+            {chat.unreadCount > 0 && (
+              <span className="bg-blue-500 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
+                {chat.unreadCount}
+              </span>
+            )}
           </li>
         ))}
         {chats.length === 0 && (
