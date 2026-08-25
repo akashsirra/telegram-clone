@@ -409,169 +409,192 @@ export default function Home() {
 
   // ---------- RENDER ----------
 
+  // Always mounted so pc.ontrack has a ref to attach the incoming stream to,
+  // even if the remote track arrives before callState flips to "connected".
+  const remoteAudioEl = <audio ref={remoteAudioRef} autoPlay style={{ display: "none" }} />;
+
   if (loading) {
-    return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">Loading...</div>;
+    return (
+      <>
+        {remoteAudioEl}
+        <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">Loading...</div>
+      </>
+    );
   }
 
   // Incoming call popup (shows over everything)
   if (incomingCall && callState === "ringing") {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center gap-6">
-        <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-3xl font-bold">
-          {incomingCall.otherUser.username.charAt(0).toUpperCase()}
+      <>
+        {remoteAudioEl}
+        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center gap-6">
+          <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-3xl font-bold">
+            {incomingCall.otherUser.username.charAt(0).toUpperCase()}
+          </div>
+          <p className="text-xl font-semibold">{incomingCall.otherUser.username}</p>
+          <p className="text-gray-400">Incoming call...</p>
+          <div className="flex gap-6 mt-4">
+            <button onClick={declineCall} className="bg-red-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
+              ✕
+            </button>
+            <button onClick={acceptCall} className="bg-green-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
+              ✓
+            </button>
+          </div>
         </div>
-        <p className="text-xl font-semibold">{incomingCall.otherUser.username}</p>
-        <p className="text-gray-400">Incoming call...</p>
-        <div className="flex gap-6 mt-4">
-          <button onClick={declineCall} className="bg-red-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
-            ✕
-          </button>
-          <button onClick={acceptCall} className="bg-green-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
-            ✓
-          </button>
-        </div>
-      </div>
+      </>
     );
   }
 
   // Active/outgoing call screen
   if (callState === "calling" || callState === "connected") {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center gap-6">
-        <audio ref={remoteAudioRef} autoPlay />
-        <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-3xl font-bold">
-          {activeChat?.otherUser.username.charAt(0).toUpperCase()}
+      <>
+        {remoteAudioEl}
+        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center gap-6">
+          <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-3xl font-bold">
+            {activeChat?.otherUser.username.charAt(0).toUpperCase()}
+          </div>
+          <p className="text-xl font-semibold">{activeChat?.otherUser.username}</p>
+          <p className="text-gray-400">{callState === "calling" ? "Calling..." : "Connected"}</p>
+          <div className="flex gap-6 mt-4">
+            <button
+              onClick={toggleMute}
+              className={`rounded-full w-16 h-16 flex items-center justify-center text-xl ${muted ? "bg-gray-600" : "bg-gray-700"}`}
+            >
+              {muted ? "🔇" : "🎙️"}
+            </button>
+            <button onClick={endCall} className="bg-red-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
+              ✕
+            </button>
+          </div>
         </div>
-        <p className="text-xl font-semibold">{activeChat?.otherUser.username}</p>
-        <p className="text-gray-400">{callState === "calling" ? "Calling..." : "Connected"}</p>
-        <div className="flex gap-6 mt-4">
-          <button
-            onClick={toggleMute}
-            className={`rounded-full w-16 h-16 flex items-center justify-center text-xl ${muted ? "bg-gray-600" : "bg-gray-700"}`}
-          >
-            {muted ? "🔇" : "🎙️"}
-          </button>
-          <button onClick={endCall} className="bg-red-600 rounded-full w-16 h-16 flex items-center justify-center text-2xl">
-            ✕
-          </button>
-        </div>
-      </div>
+      </>
     );
   }
 
   if (activeChat) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex flex-col">
-        <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800">
-          <button onClick={goBackToList} className="text-blue-400">← Back</button>
-          <span className="font-semibold flex-1">{activeChat.otherUser.username}</span>
-          <button onClick={startCall} className="bg-green-600 rounded-full w-9 h-9 flex items-center justify-center">
-            📞
-          </button>
-        </header>
+      <>
+        {remoteAudioEl}
+        <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+          <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800">
+            <button onClick={goBackToList} className="text-blue-400">← Back</button>
+            <span className="font-semibold flex-1">{activeChat.otherUser.username}</span>
+            <button onClick={startCall} className="bg-green-600 rounded-full w-9 h-9 flex items-center justify-center">
+              📞
+            </button>
+          </header>
 
-        <div className="flex-1 p-4 space-y-3 overflow-y-auto">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`max-w-[70%] px-3 py-2 rounded-lg ${
-                msg.sender_id === userId ? "bg-blue-600 ml-auto" : "bg-gray-800"
-              }`}
-            >
-              <p className="text-sm">{msg.content}</p>
-              <span className="text-xs text-gray-300">
-                {new Date(msg.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-              </span>
-            </div>
-          ))}
-        </div>
+          <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`max-w-[70%] px-3 py-2 rounded-lg ${
+                  msg.sender_id === userId ? "bg-blue-600 ml-auto" : "bg-gray-800"
+                }`}
+              >
+                <p className="text-sm">{msg.content}</p>
+                <span className="text-xs text-gray-300">
+                  {new Date(msg.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
 
-        <div className="p-3 border-t border-gray-800 flex gap-2">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
-            placeholder="Message"
-            className="flex-1 bg-gray-800 rounded-full px-4 py-2 text-sm outline-none"
-          />
-          <button onClick={handleSend} className="bg-blue-600 rounded-full px-4 py-2 text-sm font-semibold">
-            Send
-          </button>
+          <div className="p-3 border-t border-gray-800 flex gap-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
+              placeholder="Message"
+              className="flex-1 bg-gray-800 rounded-full px-4 py-2 text-sm outline-none"
+            />
+            <button onClick={handleSend} className="bg-blue-600 rounded-full px-4 py-2 text-sm font-semibold">
+              Send
+            </button>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   if (showNewChat) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white">
-        <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800">
-          <button onClick={() => setShowNewChat(false)} className="text-blue-400">← Back</button>
-          <span className="font-semibold">New Chat</span>
-        </header>
-        <ul>
-          {allUsers.map((u) => (
-            <li
-              key={u.id}
-              onClick={() => startChatWith(u)}
-              className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 hover:bg-gray-800 cursor-pointer"
-            >
-              <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-semibold">
-                {u.username.charAt(0).toUpperCase()}
-              </div>
-              <span className="font-semibold">{u.username}</span>
-            </li>
-          ))}
-          {allUsers.length === 0 && (
-            <p className="text-gray-400 p-4">No other users yet. Ask a friend to sign up!</p>
-          )}
-        </ul>
-      </div>
+      <>
+        {remoteAudioEl}
+        <div className="min-h-screen bg-gray-900 text-white">
+          <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800">
+            <button onClick={() => setShowNewChat(false)} className="text-blue-400">← Back</button>
+            <span className="font-semibold">New Chat</span>
+          </header>
+          <ul>
+            {allUsers.map((u) => (
+              <li
+                key={u.id}
+                onClick={() => startChatWith(u)}
+                className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 hover:bg-gray-800 cursor-pointer"
+              >
+                <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-semibold">
+                  {u.username.charAt(0).toUpperCase()}
+                </div>
+                <span className="font-semibold">{u.username}</span>
+              </li>
+            ))}
+            {allUsers.length === 0 && (
+              <p className="text-gray-400 p-4">No other users yet. Ask a friend to sign up!</p>
+            )}
+          </ul>
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="flex items-center justify-between px-4 py-4 border-b border-gray-800">
-        <h1 className="text-2xl font-bold">Telegram Clone</h1>
-        <div className="flex gap-3">
-          <button onClick={openNewChat} className="bg-blue-600 rounded-full px-3 py-1 text-sm font-semibold">
-            + New
-          </button>
-          <button onClick={handleLogout} className="text-gray-400 text-sm">
-            Log out
-          </button>
-        </div>
-      </header>
+    <>
+      {remoteAudioEl}
+      <div className="min-h-screen bg-gray-900 text-white">
+        <header className="flex items-center justify-between px-4 py-4 border-b border-gray-800">
+          <h1 className="text-2xl font-bold">Telegram Clone</h1>
+          <div className="flex gap-3">
+            <button onClick={openNewChat} className="bg-blue-600 rounded-full px-3 py-1 text-sm font-semibold">
+              + New
+            </button>
+            <button onClick={handleLogout} className="text-gray-400 text-sm">
+              Log out
+            </button>
+          </div>
+        </header>
 
-      <ul>
-        {chats.map((chat) => (
-          <li
-            key={chat.chatId}
-            onClick={() => openChat(chat.chatId, chat.otherUser)}
-            className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 hover:bg-gray-800 cursor-pointer"
-          >
-            <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-semibold shrink-0">
-              {chat.otherUser.username.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-baseline">
-                <span className="font-semibold truncate">{chat.otherUser.username}</span>
-                <span className="text-xs text-gray-400 shrink-0">{chat.lastTime}</span>
+        <ul>
+          {chats.map((chat) => (
+            <li
+              key={chat.chatId}
+              onClick={() => openChat(chat.chatId, chat.otherUser)}
+              className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 hover:bg-gray-800 cursor-pointer"
+            >
+              <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-semibold shrink-0">
+                {chat.otherUser.username.charAt(0).toUpperCase()}
               </div>
-              <p className="text-sm text-gray-400 truncate">{chat.lastMessage}</p>
-            </div>
-            {chat.unreadCount > 0 && (
-              <span className="bg-blue-500 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
-                {chat.unreadCount}
-              </span>
-            )}
-          </li>
-        ))}
-        {chats.length === 0 && (
-          <p className="text-gray-400 p-4">No chats yet. Tap "+ New" to start one!</p>
-        )}
-      </ul>
-    </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-baseline">
+                  <span className="font-semibold truncate">{chat.otherUser.username}</span>
+                  <span className="text-xs text-gray-400 shrink-0">{chat.lastTime}</span>
+                </div>
+                <p className="text-sm text-gray-400 truncate">{chat.lastMessage}</p>
+              </div>
+              {chat.unreadCount > 0 && (
+                <span className="bg-blue-500 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
+                  {chat.unreadCount}
+                </span>
+              )}
+            </li>
+          ))}
+          {chats.length === 0 && (
+            <p className="text-gray-400 p-4">No chats yet. Tap "+ New" to start one!</p>
+          )}
+        </ul>
+      </div>
+    </>
   );
 }
