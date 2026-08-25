@@ -280,20 +280,32 @@ export default function Home() {
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     localStreamRef.current = stream;
+    console.log("[call] local mic tracks:", stream.getAudioTracks());
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
     pcRef.current = pc;
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
     pc.ontrack = (event) => {
+      console.log("[call] ontrack fired, remote streams:", event.streams);
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0];
-        remoteAudioRef.current.play().catch((err) => console.warn("Audio play blocked:", err));
+        remoteAudioRef.current.play().catch((err) => console.warn("[call] Audio play blocked:", err));
+      } else {
+        console.warn("[call] ontrack fired but remoteAudioRef is null!");
       }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("[call] ICE connection state:", pc.iceConnectionState);
+    };
+    pc.onconnectionstatechange = () => {
+      console.log("[call] Peer connection state:", pc.connectionState);
     };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log("[call] local ICE candidate type:", event.candidate.type, event.candidate.candidate);
         supabase.from("call_signals").insert({
           chat_id: activeChat.chatId,
           sender_id: userId,
@@ -352,20 +364,32 @@ export default function Home() {
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     localStreamRef.current = stream;
+    console.log("[call] local mic tracks:", stream.getAudioTracks());
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
     pcRef.current = pc;
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
     pc.ontrack = (event) => {
+      console.log("[call] ontrack fired, remote streams:", event.streams);
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0];
-        remoteAudioRef.current.play().catch((err) => console.warn("Audio play blocked:", err));
+        remoteAudioRef.current.play().catch((err) => console.warn("[call] Audio play blocked:", err));
+      } else {
+        console.warn("[call] ontrack fired but remoteAudioRef is null!");
       }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("[call] ICE connection state:", pc.iceConnectionState);
+    };
+    pc.onconnectionstatechange = () => {
+      console.log("[call] Peer connection state:", pc.connectionState);
     };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log("[call] local ICE candidate type:", event.candidate.type, event.candidate.candidate);
         supabase.from("call_signals").insert({
           chat_id: chatId,
           sender_id: userId,
