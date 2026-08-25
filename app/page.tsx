@@ -10,7 +10,28 @@ type Message = { id: string; sender_id: string; content: string; created_at: str
 type CallState = "idle" | "calling" | "ringing" | "connected";
 
 const RTC_CONFIG = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    // Free public TURN server (openrelay) — needed so calls work across
+    // different networks / mobile data / restrictive NATs where STUN alone
+    // can't establish a media path. Swap for your own TURN provider for
+    // production use, since this one is rate-limited and not guaranteed uptime.
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+  ],
 };
 
 export default function Home() {
@@ -267,6 +288,7 @@ export default function Home() {
     pc.ontrack = (event) => {
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0];
+        remoteAudioRef.current.play().catch((err) => console.warn("Audio play blocked:", err));
       }
     };
 
@@ -338,6 +360,7 @@ export default function Home() {
     pc.ontrack = (event) => {
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0];
+        remoteAudioRef.current.play().catch((err) => console.warn("Audio play blocked:", err));
       }
     };
 
