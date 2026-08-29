@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "./lib/supabase";
 
-type Profile = { id: string; username: string };
+type Profile = { id: string; username: string; avatar_url?: string | null };
 type ChatSummary = { chatId: string; otherUser: Profile; lastMessage: string; lastTime: string; unreadCount: number };
 type Message = { id: string; sender_id: string; content: string; created_at: string; read?: boolean };
 type CallState = "idle" | "calling" | "ringing" | "connected";
@@ -39,6 +39,7 @@ export default function Home() {
   const [userId, setUserId] = useState<string | null>(null);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [activeChat, setActiveChat] = useState<{ chatId: string; otherUser: Profile } | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -52,6 +53,7 @@ export default function Home() {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [chatTheme, setChatTheme] = useState<"ocean" | "aurora" | "sunset">("ocean");
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const [showProfileDrawer, setShowProfileDrawer] = useState(false);
 
   // Calling state
   const [callState, setCallState] = useState<CallState>("idle");
@@ -70,6 +72,15 @@ export default function Home() {
         return;
       }
       setUserId(user.id);
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id, username, avatar_url")
+        .eq("id", user.id)
+        .single();
+
+      setCurrentProfile(profile ?? null);
+
       await loadChats(user.id);
       setLoading(false);
       listenForPresence(user.id);
@@ -131,7 +142,7 @@ export default function Home() {
     for (const chatId of chatIds) {
       const { data: others } = await supabase
         .from("chat_participants")
-        .select("user_id, profiles(id, username)")
+        .select("user_id, profiles(id, username, avatar_url)")
         .eq("chat_id", chatId)
         .neq("user_id", uid);
 
@@ -168,7 +179,7 @@ export default function Home() {
   }
 
   async function openNewChat() {
-    const { data } = await supabase.from("profiles").select("id, username");
+    const { data } = await supabase.from("profiles").select("id, username, avatar_url");
     setAllUsers((data ?? []).filter((u) => u.id !== userId));
     setShowNewChat(true);
   }
@@ -351,6 +362,55 @@ export default function Home() {
     if (!error) {
       setDraft("");
     }
+  }
+
+  async function handleAvatarUpload(file: File) {
+    if (!userId) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file.");
+      return;
+    }
+
+    const extension = file.name.split(".").pop() || "jpg";
+    const filePath = `${userId}/avatar.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(filePath, file, {
+        upsert: true,
+        contentType: file.type,
+      });
+
+    if (uploadError) {
+      alert("Avatar upload failed: " + uploadError.message);
+      return;
+    }
+
+    const { data } = supabase.storage
+      .from("avatars")
+      .getPublicUrl(filePath);
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ avatar_url: data.publicUrl })
+      .eq("id", userId);
+
+    if (profileError) {
+      alert("Profile update failed: " + profileError.message);
+      return;
+    }
+
+    const { data: updatedProfile } = await supabase
+      .from("profiles")
+      .select("id, username, avatar_url")
+      .eq("id", userId)
+      .single();
+
+    setCurrentProfile(updatedProfile ?? null);
+
+    await loadChats(userId);
+    alert("Avatar updated! 📸");
   }
 
   async function handleLogout() {
@@ -795,8 +855,139 @@ export default function Home() {
   return (
     <>
       {remoteAudioEl}
+
+      {showProfileDrawer && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowProfileDrawer(false)}
+        >
+          <aside
+            className="absolute left-0 top-0 h-full w-[85%] max-w-sm bg-gray-950 text-white shadow-2xl border-r border-gray-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative h-52 bg-gradient-to-br from-blue-700 via-indigo-700 to-purple-800">
+              <button
+                onClick={() => setShowProfileDrawer(false)}
+                className="absolute top-4 right-4 w-9 h-9 rounded-full bg-black/30 hover:bg-black/50 text-xl"
+              >
+                ×
+              </button>
+
+              <div className="absolute -bottom-14 left-6">
+                <label className="cursor-pointer block">
+                  <div className="w-28 h-28 rounded-full bg-blue-600 border-4 border-gray-950 overflow-hidden flex items-center justify-center text-4xl font-bold shadow-xl">
+                    {currentProfile?.avatar_url ? (
+                      <img
+                        src={`${currentProfile.avatar_url}?t=${Date.now()}`}
+                        alt={currentProfile.username}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      currentProfile?.username?.charAt(0).toUpperCase() || "👤"
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleAvatarUpload(file);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="pt-20 px-6">
+              <h2 className="text-2xl font-bold">
+                {currentProfile?.username || "Your Profile"}
+              </h2>
+
+              <p className="text-green-400 text-sm mt-1">
+                ● Online
+              </p>
+
+              <p className="text-gray-500 text-xs mt-1">
+                Tap your photo to change it
+              </p>
+
+              <div className="mt-8 space-y-3">
+                <label className="flex items-center gap-4 p-4 rounded-2xl bg-gray-900 hover:bg-gray-800 cursor-pointer transition">
+                  <span className="text-2xl">📸</span>
+                  <div>
+                    <div className="font-semibold">Change profile photo</div>
+                    <div className="text-xs text-gray-500">Choose a new avatar</div>
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleAvatarUpload(file);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+
+                <button
+                  onClick={() => {
+                    setShowProfileDrawer(false);
+                    setShowThemePicker(true);
+                  }}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl bg-gray-900 hover:bg-gray-800 transition text-left"
+                >
+                  <span className="text-2xl">🎨</span>
+                  <div>
+                    <div className="font-semibold">Chat appearance</div>
+                    <div className="text-xs text-gray-500">Customize your conversation</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl bg-gray-900 hover:bg-red-950 text-left transition"
+                >
+                  <span className="text-2xl">🚪</span>
+                  <div>
+                    <div className="font-semibold text-red-400">Log out</div>
+                    <div className="text-xs text-gray-500">Sign out of this account</div>
+                  </div>
+                </button>
+              </div>
+
+              <div className="mt-10 text-center text-xs text-gray-600">
+                Telegram Clone • Your private space
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
       <div className="min-h-screen bg-gray-900 text-white">
         <header className="flex items-center justify-between px-4 py-4 border-b border-gray-800">
+          <button
+            onClick={() => setShowProfileDrawer(true)}
+            className="relative cursor-pointer group"
+            aria-label="Open profile"
+          >
+            <div className="w-11 h-11 rounded-full bg-blue-600 flex items-center justify-center font-bold overflow-hidden ring-2 ring-gray-700 group-hover:ring-blue-400 transition">
+              {currentProfile?.avatar_url ? (
+                <img
+                  src={`${currentProfile.avatar_url}?t=${Date.now()}`}
+                  alt={currentProfile.username}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>
+                  {currentProfile?.username?.charAt(0).toUpperCase() || "👤"}
+                </span>
+              )}
+            </div>
+            <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-gray-900 rounded-full" />
+          </button>
           <h1 className="text-2xl font-bold">Telegram Clone</h1>
           <div className="flex gap-3">
             <button onClick={openNewChat} className="bg-blue-600 rounded-full px-3 py-1 text-sm font-semibold">
@@ -815,8 +1006,16 @@ export default function Home() {
               onClick={() => openChat(chat.chatId, chat.otherUser)}
               className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 hover:bg-gray-800 cursor-pointer"
             >
-              <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-semibold shrink-0">
-                {chat.otherUser.username.charAt(0).toUpperCase()}
+              <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-semibold shrink-0 overflow-hidden">
+                {chat.otherUser.avatar_url ? (
+                  <img
+                    src={chat.otherUser.avatar_url}
+                    alt={chat.otherUser.username}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  chat.otherUser.username.charAt(0).toUpperCase()
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-baseline">

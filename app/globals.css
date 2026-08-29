@@ -24,3 +24,32 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+
+/* Telegram Clone chat themes */
+.chat-theme-ocean {
+  --chat-bg: #071a2b;
+  --chat-header: #0b263d;
+  --chat-input: #102f49;
+  --chat-border: #183e5c;
+  --chat-accent: #1683d8;
+  --chat-bubble-other: #102f49;
+}
+
+.chat-theme-aurora {
+  --chat-bg: #160d26;
+  --chat-header: #211238;
+  --chat-input: #2b1748;
+  --chat-border: #432565;
+  --chat-accent: #8b5cf6;
+  --chat-bubble-other: #2b1748;
+}
+
+.chat-theme-sunset {
+  --chat-bg: #26100d;
+  --chat-header: #391813;
+  --chat-input: #4a211a;
+  --chat-border: #663026;
+  --chat-accent: #f97316;
+  --chat-bubble-other: #4a211a;
+}
