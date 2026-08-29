@@ -44,6 +44,8 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
+  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const presenceChannelRef = useRef<any>(null);
 
   // Calling state
   const [callState, setCallState] = useState<CallState>("idle");
@@ -64,10 +66,47 @@ export default function Home() {
       setUserId(user.id);
       await loadChats(user.id);
       setLoading(false);
+      listenForPresence(user.id);
       listenForIncomingCalls(user.id);
     }
     init();
   }, []);
+
+  function listenForPresence(uid: string) {
+    if (presenceChannelRef.current) return;
+
+    const channel = supabase.channel("online-users", {
+      config: { presence: { key: uid } },
+    });
+
+    const updatePresence = () => {
+      const state = channel.presenceState();
+      const ids = new Set<string>();
+
+      Object.entries(state).forEach(([key, entries]) => {
+        if (key !== uid && entries.length > 0) {
+          ids.add(key);
+        }
+      });
+
+      setOnlineUsers(ids);
+    };
+
+    channel
+      .on("presence", { event: "sync" }, updatePresence)
+      .on("presence", { event: "join" }, updatePresence)
+      .on("presence", { event: "leave" }, updatePresence)
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({
+            user_id: uid,
+            online_at: new Date().toISOString(),
+          });
+        }
+      });
+
+    presenceChannelRef.current = channel;
+  }
 
   async function loadChats(uid: string) {
     const { data: participantRows } = await supabase
@@ -527,7 +566,12 @@ export default function Home() {
         <div className="min-h-screen bg-gray-900 text-white flex flex-col">
           <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800">
             <button onClick={goBackToList} className="text-blue-400">← Back</button>
-            <span className="font-semibold flex-1">{activeChat.otherUser.username}</span>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold truncate">{activeChat.otherUser.username}</div>
+              <div className={`text-xs ${onlineUsers.has(activeChat.otherUser.id) ? "text-green-400" : "text-gray-500"}`}>
+                {onlineUsers.has(activeChat.otherUser.id) ? "🟢 Online" : "⚫ Offline"}
+              </div>
+            </div>
             <button onClick={startCall} className="bg-green-600 rounded-full w-9 h-9 flex items-center justify-center">
               📞
             </button>
