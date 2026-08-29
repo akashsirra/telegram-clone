@@ -47,8 +47,11 @@ export default function Home() {
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const presenceChannelRef = useRef<any>(null);
   const typingChannelRef = useRef<any>(null);
+  const messagesChannelRef = useRef<any>(null);
   const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [chatTheme, setChatTheme] = useState<"ocean" | "aurora" | "sunset">("ocean");
+  const [showThemePicker, setShowThemePicker] = useState(false);
 
   // Calling state
   const [callState, setCallState] = useState<CallState>("idle");
@@ -219,6 +222,13 @@ export default function Home() {
     setActiveChat({ chatId, otherUser });
     setIsOtherUserTyping(false);
 
+    const savedTheme = localStorage.getItem(`chat-theme:${chatId}`);
+    if (savedTheme === "ocean" || savedTheme === "aurora" || savedTheme === "sunset") {
+      setChatTheme(savedTheme);
+    } else {
+      setChatTheme("ocean");
+    }
+
     if (typingChannelRef.current) {
       await supabase.removeChannel(typingChannelRef.current);
       typingChannelRef.current = null;
@@ -260,7 +270,12 @@ export default function Home() {
         .eq("read", false);
     }
 
-    supabase
+    if (messagesChannelRef.current) {
+      await supabase.removeChannel(messagesChannelRef.current);
+      messagesChannelRef.current = null;
+    }
+
+    const messagesChannel = supabase
       .channel(`messages:${chatId}`)
       .on(
         "postgres_changes",
@@ -270,12 +285,23 @@ export default function Home() {
             if (prev.some((m) => m.id === payload.new.id)) return prev;
             return [...prev, payload.new as Message];
           });
+
           if (userId && payload.new.sender_id !== userId) {
             supabase.from("messages").update({ read: true }).eq("id", payload.new.id).then();
           }
         }
-      )
-      .subscribe();
+      );
+
+    messagesChannelRef.current = messagesChannel;
+    await messagesChannel.subscribe();
+  }
+
+  function changeChatTheme(theme: "ocean" | "aurora" | "sunset") {
+    setChatTheme(theme);
+
+    if (activeChat) {
+      localStorage.setItem(`chat-theme:${activeChat.chatId}`, theme);
+    }
   }
 
   async function handleTyping(value: string) {
@@ -627,9 +653,13 @@ export default function Home() {
     return (
       <>
         {remoteAudioEl}
-        <div className="min-h-screen bg-gray-900 text-white flex flex-col">
-          <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800">
+        <div className={`min-h-screen text-white flex flex-col chat-theme-${chatTheme}`} style={{ backgroundColor: "var(--chat-bg)" }}>
+          <header
+            className="flex items-center gap-3 px-4 py-3 border-b"
+            style={{ backgroundColor: "var(--chat-header)", borderColor: "var(--chat-border)" }}
+          >
             <button onClick={goBackToList} className="text-blue-400">← Back</button>
+
             <div className="flex-1 min-w-0">
               <div className="font-semibold truncate">{activeChat.otherUser.username}</div>
               <div className={`text-xs ${isOtherUserTyping ? "text-blue-400" : onlineUsers.has(activeChat.otherUser.id) ? "text-green-400" : "text-gray-500"}`}>
@@ -640,18 +670,71 @@ export default function Home() {
                     : "⚫ Offline"}
               </div>
             </div>
+
+            <div className="relative">
+              <button
+                onClick={() => setShowThemePicker(!showThemePicker)}
+                className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10"
+              >
+                🎨
+              </button>
+
+              {showThemePicker && (
+                <div
+                  className="absolute right-0 top-11 z-50 w-40 rounded-xl p-2 shadow-xl border"
+                  style={{
+                    backgroundColor: "var(--chat-header)",
+                    borderColor: "var(--chat-border)",
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      changeChatTheme("ocean");
+                      setShowThemePicker(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10"
+                  >
+                    🌊 Ocean
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      changeChatTheme("aurora");
+                      setShowThemePicker(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10"
+                  >
+                    🌌 Aurora
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      changeChatTheme("sunset");
+                      setShowThemePicker(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10"
+                  >
+                    🌅 Sunset
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button onClick={startCall} className="bg-green-600 rounded-full w-9 h-9 flex items-center justify-center">
               📞
             </button>
           </header>
 
-          <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+          <div className="flex-1 p-4 space-y-3 overflow-y-auto" style={{ backgroundColor: "var(--chat-bg)" }}>
             {messages.map((msg) => (
               <div
                 key={msg.id}
                 className={`max-w-[70%] px-3 py-2 rounded-lg ${
-                  msg.sender_id === userId ? "bg-blue-600 ml-auto" : "bg-gray-800"
+                  msg.sender_id === userId ? "ml-auto" : ""
                 }`}
+                style={{
+                  backgroundColor: msg.sender_id === userId ? "var(--chat-accent)" : "var(--chat-bubble-other)",
+                }}
               >
                 <p className="text-sm">{msg.content}</p>
                 <span className="text-xs text-gray-300">
@@ -661,15 +744,15 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="p-3 border-t border-gray-800 flex gap-2">
+          <div className="p-3 border-t flex gap-2" style={{ backgroundColor: "var(--chat-header)", borderColor: "var(--chat-border)" }}>
             <input
               value={draft}
               onChange={(e) => handleTyping(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
               placeholder="Message"
-              className="flex-1 bg-gray-800 rounded-full px-4 py-2 text-sm outline-none"
+              className="flex-1 rounded-full px-4 py-2 text-sm outline-none" style={{ backgroundColor: "var(--chat-input)" }}
             />
-            <button onClick={handleSend} className="bg-blue-600 rounded-full px-4 py-2 text-sm font-semibold">
+            <button onClick={handleSend} className="rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: "var(--chat-accent)" }}>
               Send
             </button>
           </div>
