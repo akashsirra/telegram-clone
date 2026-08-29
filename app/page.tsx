@@ -44,6 +44,8 @@ export default function Home() {
   const [activeChat, setActiveChat] = useState<{ chatId: string; otherUser: Profile } | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
+  const [reactionMessageId, setReactionMessageId] = useState<string | null>(null);
+  const [messageReactions, setMessageReactions] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const presenceChannelRef = useRef<any>(null);
@@ -347,6 +349,14 @@ export default function Home() {
         }
       }, 1500);
     }
+  }
+
+  function chooseReaction(messageId: string, emoji: string) {
+    setMessageReactions((prev) => ({
+      ...prev,
+      [messageId]: prev[messageId] === emoji ? "" : emoji,
+    }));
+    setReactionMessageId(null);
   }
 
   async function handleSend() {
@@ -722,12 +732,29 @@ export default function Home() {
 
             <div className="flex-1 min-w-0">
               <div className="font-semibold truncate">{activeChat.otherUser.username}</div>
-              <div className={`text-xs ${isOtherUserTyping ? "text-blue-400" : onlineUsers.has(activeChat.otherUser.id) ? "text-green-400" : "text-gray-500"}`}>
-                {isOtherUserTyping
-                  ? "✍️ Typing..."
-                  : onlineUsers.has(activeChat.otherUser.id)
-                    ? "🟢 Online"
-                    : "⚫ Offline"}
+              <div className="flex items-center gap-2 text-xs">
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${
+                    isOtherUserTyping
+                      ? "bg-blue-400 presence-pulse"
+                      : onlineUsers.has(activeChat.otherUser.id)
+                        ? "bg-green-400 presence-pulse"
+                        : "bg-gray-600"
+                  }`}
+                />
+                <span className={
+                  isOtherUserTyping
+                    ? "text-blue-400"
+                    : onlineUsers.has(activeChat.otherUser.id)
+                      ? "text-green-400"
+                      : "text-gray-500"
+                }>
+                  {isOtherUserTyping
+                    ? "Typing..."
+                    : onlineUsers.has(activeChat.otherUser.id)
+                      ? "Online"
+                      : "Offline"}
+                </span>
               </div>
             </div>
 
@@ -789,17 +816,65 @@ export default function Home() {
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`max-w-[70%] px-3 py-2 rounded-lg ${
+                className={`relative max-w-[70%] px-3 py-2 rounded-lg ${
                   msg.sender_id === userId ? "ml-auto" : ""
                 }`}
                 style={{
-                  backgroundColor: msg.sender_id === userId ? "var(--chat-accent)" : "var(--chat-bubble-other)",
+                  backgroundColor: msg.sender_id === userId
+                    ? "var(--chat-accent)"
+                    : "var(--chat-bubble-other)",
                 }}
+                onClick={() =>
+                  setReactionMessageId(
+                    reactionMessageId === msg.id ? null : msg.id
+                  )
+                }
               >
+                {reactionMessageId === msg.id && (
+                  <div
+                    className={`absolute -top-11 ${
+                      msg.sender_id === userId ? "right-0" : "left-0"
+                    } z-40 flex items-center gap-1 px-2 py-1.5 rounded-full shadow-2xl border backdrop-blur-md`}
+                    style={{
+                      backgroundColor: "var(--chat-header)",
+                      borderColor: "var(--chat-border)",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {["❤️", "😂", "🔥", "👍", "😮"].map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => chooseReaction(msg.id, emoji)}
+                        className="w-8 h-8 rounded-full hover:bg-white/10 hover:scale-125 transition-transform text-lg"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <p className="text-sm">{msg.content}</p>
-                <span className="text-xs text-gray-300">
-                  {new Date(msg.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-                </span>
+
+                <div className="flex items-center justify-end gap-1 mt-1">
+                  <span className="text-xs text-gray-300">
+                    {new Date(msg.created_at).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+
+                {messageReactions[msg.id] && (
+                  <div
+                    className="absolute -bottom-3 right-2 px-2 py-0.5 rounded-full text-sm border shadow-lg"
+                    style={{
+                      backgroundColor: "var(--chat-header)",
+                      borderColor: "var(--chat-border)",
+                    }}
+                  >
+                    {messageReactions[msg.id]}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -1006,7 +1081,11 @@ export default function Home() {
               onClick={() => openChat(chat.chatId, chat.otherUser)}
               className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 hover:bg-gray-800 cursor-pointer"
             >
-              <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-semibold shrink-0 overflow-hidden">
+              <div className={`w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center font-semibold shrink-0 overflow-hidden ${
+                onlineUsers.has(chat.otherUser.id)
+                  ? "online-avatar-ring"
+                  : ""
+              }`}>
                 {chat.otherUser.avatar_url ? (
                   <img
                     src={chat.otherUser.avatar_url}

@@ -53,3 +53,24 @@ body {
   --chat-accent: #f97316;
   --chat-bubble-other: #4a211a;
 }
+
+/* Orbit Presence */
+.presence-pulse {
+  animation: orbitPresencePulse 1.8s ease-in-out infinite;
+}
+
+.online-avatar-ring {
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.8), 0 0 14px rgba(34, 197, 94, 0.35);
+}
+
+@keyframes orbitPresencePulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.45;
+    transform: scale(0.72);
+  }
+}
