@@ -46,6 +46,9 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const presenceChannelRef = useRef<any>(null);
+  const typingChannelRef = useRef<any>(null);
+  const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Calling state
   const [callState, setCallState] = useState<CallState>("idle");
@@ -214,6 +217,33 @@ export default function Home() {
 
   async function openChat(chatId: string, otherUser: Profile) {
     setActiveChat({ chatId, otherUser });
+    setIsOtherUserTyping(false);
+
+    if (typingChannelRef.current) {
+      await supabase.removeChannel(typingChannelRef.current);
+      typingChannelRef.current = null;
+    }
+
+    const typingChannel = supabase
+      .channel(`typing:${chatId}`)
+      .on("broadcast", { event: "typing" }, ({ payload }) => {
+        if (payload?.user_id === userId) return;
+
+        setIsOtherUserTyping(Boolean(payload?.is_typing));
+
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+        }
+
+        if (payload?.is_typing) {
+          typingTimeoutRef.current = setTimeout(() => {
+            setIsOtherUserTyping(false);
+          }, 2000);
+        }
+      })
+      .subscribe();
+
+    typingChannelRef.current = typingChannel;
     const { data } = await supabase
       .from("messages")
       .select("id, sender_id, content, created_at, read")
@@ -246,6 +276,40 @@ export default function Home() {
         }
       )
       .subscribe();
+  }
+
+  async function handleTyping(value: string) {
+    setDraft(value);
+
+    if (!activeChat || !userId || !typingChannelRef.current) return;
+
+    await typingChannelRef.current.send({
+      type: "broadcast",
+      event: "typing",
+      payload: {
+        user_id: userId,
+        is_typing: value.length > 0,
+      },
+    });
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    if (value.length > 0) {
+      typingTimeoutRef.current = setTimeout(async () => {
+        if (typingChannelRef.current) {
+          await typingChannelRef.current.send({
+            type: "broadcast",
+            event: "typing",
+            payload: {
+              user_id: userId,
+              is_typing: false,
+            },
+          });
+        }
+      }, 1500);
+    }
   }
 
   async function handleSend() {
@@ -568,8 +632,12 @@ export default function Home() {
             <button onClick={goBackToList} className="text-blue-400">← Back</button>
             <div className="flex-1 min-w-0">
               <div className="font-semibold truncate">{activeChat.otherUser.username}</div>
-              <div className={`text-xs ${onlineUsers.has(activeChat.otherUser.id) ? "text-green-400" : "text-gray-500"}`}>
-                {onlineUsers.has(activeChat.otherUser.id) ? "🟢 Online" : "⚫ Offline"}
+              <div className={`text-xs ${isOtherUserTyping ? "text-blue-400" : onlineUsers.has(activeChat.otherUser.id) ? "text-green-400" : "text-gray-500"}`}>
+                {isOtherUserTyping
+                  ? "✍️ Typing..."
+                  : onlineUsers.has(activeChat.otherUser.id)
+                    ? "🟢 Online"
+                    : "⚫ Offline"}
               </div>
             </div>
             <button onClick={startCall} className="bg-green-600 rounded-full w-9 h-9 flex items-center justify-center">
@@ -596,7 +664,7 @@ export default function Home() {
           <div className="p-3 border-t border-gray-800 flex gap-2">
             <input
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => handleTyping(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
               placeholder="Message"
               className="flex-1 bg-gray-800 rounded-full px-4 py-2 text-sm outline-none"
